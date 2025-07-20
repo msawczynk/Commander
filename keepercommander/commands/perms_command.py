@@ -16,7 +16,8 @@ from keepercommander.record_management import add_record_to_folder
 from keepercommander.vault import KeeperRecord
 from keepercommander import utils
 from keepercommander.proto import record_pb2
-from keepercommander.attachment import FileUploadTask, prepare_attachment_download, AttachmentDownloadRequest, BytesUploadTask, upload_attachments, update_record
+from keepercommander.attachment import FileUploadTask, prepare_attachment_download, AttachmentDownloadRequest, BytesUploadTask, upload_attachments
+from keepercommander.record_management import update_record
 from io import StringIO
 import io
 import tempfile
