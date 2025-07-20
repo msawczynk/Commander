@@ -16,10 +16,16 @@ from keepercommander.record_management import add_record_to_folder
 from keepercommander.vault import KeeperRecord
 from keepercommander import utils
 from keepercommander.proto import record_pb2
-from keepercommander.attachment import FileUploadTask, prepare_attachment_download, AttachmentDownloadRequest, BytesUploadTask, upload_attachments, update_record
+from keepercommander.attachment import (
+    FileUploadTask,
+    prepare_attachment_download,
+    AttachmentDownloadRequest,
+    BytesUploadTask,
+    upload_attachments,
+)
+from keepercommander.record_management import update_record
 from io import StringIO
 import io
-import tempfile
 
 # Setup logging (Commander may have its own, but for now)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -123,9 +129,10 @@ apply_parser = argparse.ArgumentParser(prog='perms apply', description='Apply pe
 apply_parser.add_argument('csv', help='CSV path')
 
 class KeeperPerms:
-    def __init__(self, params: KeeperParams, interactive: bool = False):
+    def __init__(self, params: KeeperParams, interactive: bool = False, config_title: str = 'Perms Config'):
         self.params = params
         self.interactive = interactive
+        self.config_title = config_title
         # Authentication is handled by Commander, so no load_or_login needed
 
     def get_teams(self) -> List[Dict[str, Any]]:
@@ -166,27 +173,44 @@ class KeeperPerms:
     def generate_template(self, output: Union[str, io.StringIO]):
         teams = [t['team_name'] for t in self.get_teams()]
         records = self.get_records()
-        is_file = isinstance(output, str)
-        if is_file:
+        close_file = False
+        if isinstance(output, str):
             csvfile = open(output, 'w', newline='')
+            close_file = True
         else:
-            csvfile = csv.writer(output)
-            csv_writer = csv.writer(csvfile)
+            csvfile = output
         writer = csv.writer(csvfile)
         writer.writerow(['Record UID', 'Title', 'Folder Path'] + teams)
         for rec in records:
             writer.writerow([rec['uid'], rec['title'], rec['folder_path']] + [''] * len(teams))
-        if is_file:
+        if close_file:
             csvfile.close()
-            logging.info(f"Template generated at {output}")
+            logging.info("Template generated at %s", output)
         else:
             logging.info("Template generated in memory")
 
     def validate_csv(self, csv_path: str) -> bool:
         if not os.path.exists(csv_path):
-            logging.error("CSV file not found")
+            logging.error("CSV file not found: %s", csv_path)
             return False
-        # Add more validation as needed
+        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            required = {'Record UID', 'Title', 'Folder Path'}
+            if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+                logging.error("CSV missing required columns: %s", ', '.join(required))
+                return False
+            teams = {t['team_name'].lower() for t in self.get_teams()}
+            allowed = {'ro', 'rw', 'rws', 'mgr', 'admin', ''}
+            for row_no, row in enumerate(reader, start=2):
+                for col, value in row.items():
+                    if col in required:
+                        continue
+                    if col.lower() not in teams:
+                        logging.error("Unknown team '%s' on line %d", col, row_no)
+                        return False
+                    if value and value.lower() not in allowed:
+                        logging.error("Invalid permission '%s' on line %d", value, row_no)
+                        return False
         return True
 
     def apply_permissions(self, csv_path: str, dry_run: bool = False, root_name: str = '[Perms]'):
@@ -195,31 +219,43 @@ class KeeperPerms:
             return
         with open(csv_path, 'r', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f)
-            logging.info(f'Fieldnames: {reader.fieldnames}')
+            logging.info('Fieldnames: %s', reader.fieldnames)
+
+            teams_lookup = {t['team_name'].lower(): t['team_uid'] for t in self.get_teams()}
             root_folder_uid = self.ensure_root_folder(root_name)
+
             for row in reader:
-                logging.info(f'Row keys: {list(row.keys())}')
+                logging.debug('Processing row: %s', row)
                 record_uid = row['Record UID']
                 folder_path = row['Folder Path']
+
                 for team_name, perm_level in row.items():
-                    if team_name not in ['Record UID', 'Title', 'Folder Path'] and perm_level:
-                        team_uid = self.get_team_uid_by_name(team_name)
-                        if not team_uid:
-                            logging.error(f"Team {team_name} not found")
-                            continue
-                        team_folder_uid = self.ensure_team_folder_path(team_name, folder_path, root_folder_uid)
-                        if not team_folder_uid:
-                            logging.error(f"Failed to ensure folder path for team {team_name}")
-                            continue
-                        permissions = self.permission_level_to_flags(perm_level)
-                        if dry_run:
-                            logging.info(f'[DRY-RUN] Would apply {perm_level} for team {team_name} to {record_uid} in {folder_path}')
-                        else:
+                    if team_name in ['Record UID', 'Title', 'Folder Path'] or not perm_level:
+                        continue
+
+                    team_uid = teams_lookup.get(team_name.lower())
+                    if not team_uid:
+                        logging.error('Team %s not found', team_name)
+                        continue
+
+                    team_folder_uid = self.ensure_team_folder_path(team_name, folder_path, root_folder_uid)
+                    if not team_folder_uid:
+                        logging.error('Failed to ensure folder path for team %s', team_name)
+                        continue
+
+                    permissions = self.permission_level_to_flags(perm_level)
+                    if dry_run:
+                        logging.info('[DRY-RUN] Would apply %s for team %s to %s in %s', perm_level, team_name, record_uid, folder_path)
+                    else:
+                        try:
                             self.share_record_to_folder(record_uid, team_folder_uid)
                             self.add_team_to_shared_folder(team_uid, team_folder_uid, permissions)
+                        except Exception as exc:
+                            logging.error('Failed to apply permission for %s/%s: %s', record_uid, team_name, exc)
+
             if not dry_run:
                 api.sync_down(self.params)
-                logging.info("Changes applied successfully")
+                logging.info('Changes applied successfully')
 
     def ensure_root_folder(self, root_name: str) -> str:
         cmd = FolderMakeCommand()
@@ -292,19 +328,28 @@ class KeeperPerms:
     def get_config_record(self) -> str:
         records = self.get_records()
         for rec in records:
-            if rec['title'] == "Perms Config":
+            if rec['title'] == self.config_title:
                 return rec['uid']
-        record_data = {"title": "Perms Config"}
+        record_data = {"title": self.config_title}
         return self.create_record(record_data)
 
     def create_record(self, record_data: Dict[str, Any]) -> str:
-        folder_name = "[Perms Config Folder]" if not self.interactive else input("Enter folder name for Perms Config record (default: [Perms Config Folder]): ") or "[Perms Config Folder]"
+        folder_name = "[Perms Config Folder]" if not self.interactive else input(
+            "Enter folder name for Perms Config record (default: [Perms Config Folder]): "
+        ) or "[Perms Config Folder]"
         cmd = FolderMakeCommand()
         folder_uid = cmd.execute(self.params, folder=folder_name, user_folder=True)
         if not folder_uid:
             logging.error("Failed to create folder")
             return ''
-        record_title = "Perms Config" if not self.interactive else input("Enter record title for Perms Config (default: Perms Config): ") or "Perms Config"
+        record_title = (
+            self.config_title
+            if not self.interactive
+            else input(
+                f"Enter record title for Perms Config (default: {self.config_title}): "
+            )
+            or self.config_title
+        )
         record = KeeperRecord.create(self.params, "general")
         record.title = record_title
         add_record_to_folder(self.params, record, folder_uid=folder_uid)
@@ -313,17 +358,21 @@ class KeeperPerms:
 
     def download_from_vault(self, attachment_title: str) -> str:
         config_record_uid = self.get_config_record()
-        attachments = list(prepare_attachment_download(self.params, config_record_uid, attachment_title))
+        attachments = list(
+            prepare_attachment_download(self.params, config_record_uid, attachment_title)
+        )
         if not attachments:
-            raise ValueError(f'Attachment "{attachment_title}" not found in Perms Config record')
+            raise ValueError(
+                f'Attachment "{attachment_title}" not found in {self.config_title} record'
+            )
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             attachments[0].download_to_file(self.params, temp_file.name)
         return temp_file.name
 
     def get_team_uid_by_name(self, team_name: str) -> Optional[str]:
-        teams = self.get_teams()
-        for team in teams:
-            if team['team_name'] == team_name:
+        name = team_name.lower()
+        for team in self.get_teams():
+            if team['team_name'].lower() == name:
                 return team['team_uid']
         return None
 
