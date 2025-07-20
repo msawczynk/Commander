@@ -4,10 +4,14 @@ This file provides guidance for AI agents contributing to this repository.
 
 ## Testing
 
-1. Create a Python virtual environment and activate it.
+1. Activate the provided Python virtual environment (located at `.venv`).
    ```bash
-   python3 -m venv venv
-   . venv/bin/activate
+   . .venv/bin/activate
+   ```
+   If the `.venv` directory does not exist, create it first:
+   ```bash
+   python3 -m venv .venv
+   . .venv/bin/activate
    pip install -U pip
    ```
 2. Install project dependencies and development tools.

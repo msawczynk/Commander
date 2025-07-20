@@ -2,10 +2,14 @@
 
 Follow these steps to run the project tests.
 
-1. Create a virtual environment and activate it:
+1. Activate the preconfigured virtual environment in the repository root:
    ```bash
-   python3 -m venv venv
-   . venv/bin/activate
+   . .venv/bin/activate
+   ```
+   If `.venv` does not exist, create it:
+   ```bash
+   python3 -m venv .venv
+   . .venv/bin/activate
    pip install -U pip
    ```
 2. Install dependencies and dev requirements:
