@@ -24,4 +24,11 @@ Follow these steps to run the project tests.
    pytest -q
    ```
 
+4. Run integration tests (these modify a live Keeper account) with:
+   ```bash
+   pytest -m integration
+   ```
+   Check the Keeper Vault used for testing to confirm records and folders were created or removed as expected.
+
+
 Tests may require additional configuration files found under `tests/`. Some integration tests rely on external Keeper accounts and will fail without proper credentials.
