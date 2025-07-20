@@ -90,6 +90,10 @@ def register_commands(commands, aliases, command_info):
     commands['verify-records'] = VerifyRecordsCommand()
     commands['verify-shared-folders'] = VerifySharedFoldersCommand()
 
+    from .perms_command import register_commands as perms_register, register_command_info as perms_command_info
+    perms_register(commands)
+    perms_command_info(aliases, command_info)
+
     from .. import importer
     importer.register_commands(commands)
     importer.register_command_info(aliases, command_info)
