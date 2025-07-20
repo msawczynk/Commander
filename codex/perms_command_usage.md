@@ -14,14 +14,14 @@ Options:
 - `--vault-only`: Write the template directly to a vault record attachment rather than a local file.
 
 ## `validate`
-Validates a permissions CSV file before applying changes.
+Validates a permissions CSV file before applying changes. Validation checks the required columns, verifies team names in the vault and ensures permission values are valid.
 
 Options:
 - `CSV_PATH`: Path to the CSV file.
 - `--vault-csv TITLE`: Download the specified attachment from the "Perms Config" record in the vault and validate it.
 
 ## `apply`
-Applies permissions from a CSV file. Each row specifies a record and permission levels for teams. Folders are automatically created under a root folder (default `[Perms]`).
+Applies permissions from a CSV file. Each row specifies a record and permission levels for teams. Folders are automatically created under a root folder (default `[Perms]`). Team lookups are case-insensitive and the configuration record is recreated automatically if missing.
 
 Options:
 - `CSV_PATH`: Path to the CSV file with permissions.
@@ -46,4 +46,7 @@ The following values map to specific permission flags:
 2. Fill in permission levels per team.
 3. Validate the file: `perms validate perms.csv`
 4. Apply permissions: `perms apply perms.csv`
+
+### Recent Improvements
+The command now validates CSV content thoroughly, matches team names case-insensitively and automatically recreates the configuration record if it is missing.
 

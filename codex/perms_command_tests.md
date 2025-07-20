@@ -7,6 +7,7 @@ Automated tests were added in `unit-tests/test_perms_command.py` to ensure the C
   - `perms template <file>` writes to a local file and stores it in the vault.
 - **Validation**
   - `perms validate --vault-csv TITLE` downloads the attachment, validates it, and prints `Valid`.
+  - Invalid CSV columns or permission values cause validation to fail.
 - **Apply**
   - `perms apply <file> --dry-run` invokes `apply_permissions` with the correct arguments.
 

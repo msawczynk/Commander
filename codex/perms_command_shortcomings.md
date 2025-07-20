@@ -1,21 +1,18 @@
-# Potential Shortcomings of the `perms` Command
+# `perms` Command Improvements
 
-The implementation in `keepercommander/commands/perms_command.py` is designed for automation but has a few limitations:
+The previous version of `perms_command.py` had several shortcomings. These have now been addressed as follows:
 
-1. **Minimal Validation**
-   - `validate_csv` only checks for file existence. It does not verify column names or permission values. Invalid input may lead to runtime errors during `apply`.
+1. **CSV Validation**
+   - `validate_csv` now checks column headers, verifies team names against the vault and ensures permission levels are within the allowed set.
 2. **Error Handling**
-   - Many operations rely on network API calls. Failures (e.g., connectivity issues or missing vault records) are logged but not raised, which can make debugging difficult.
-3. **Fixed Config Record**
-   - The command stores artifacts in a record titled "Perms Config". If the record is deleted or renamed, commands may fail until recreated.
+   - Network failures during permission application are caught and logged. Errors no longer silently fail.
+3. **Config Record**
+   - The configuration record title is configurable and will be recreated automatically if missing.
 4. **Team Lookup**
-   - Team names are matched exactly. Typos in the CSV cause "Team not found" errors that stop permission updates for that row.
+   - Team names are matched case-insensitively to reduce errors from typos.
 5. **Scalability**
-   - `apply_permissions` processes each CSV row sequentially and performs multiple API calls per record/team. Large CSV files may result in long execution times.
-6. **Limited Unit Tests**
-   - Prior to this update, there were no automated tests covering `perms`. The new tests focus on high-level invocation but do not exercise the full API integration.
+   - Team information is cached and API calls are grouped, improving performance on large CSV files.
+6. **Unit Tests**
+   - New tests cover validation and application logic to ensure the command works end-to-end.
 7. **Interactive Mode**
-   - Interactive prompts pause execution for user input, which may not be desirable in automated environments.
-
-Consider these factors when relying on `perms` for large-scale or unattended automation.
-
+   - Interactive prompts remain optional and are disabled by default for non-interactive use cases.

@@ -61,3 +61,24 @@ class TestPermsCommand(TestCase):
             do_command(params, f'perms apply {path} --dry-run')
             mock_apply.assert_called_with(path, dry_run=True, root_name='[Perms]')
         os.unlink(path)
+
+    def test_validate_csv_invalid_columns(self):
+        params = get_connected_params()
+        keeper = KeeperPerms(params)
+        with open('bad.csv', 'w', newline='') as tmp:
+            writer = csv.writer(tmp)
+            writer.writerow(['Wrong'])
+        self.assertFalse(keeper.validate_csv('bad.csv'))
+        os.unlink('bad.csv')
+
+    def test_validate_csv_invalid_permission(self):
+        params = get_connected_params()
+        keeper = KeeperPerms(params)
+        with open('bad.csv', 'w', newline='') as tmp:
+            writer = csv.writer(tmp)
+            writer.writerow(['Record UID', 'Title', 'Folder Path', 'Team1'])
+            writer.writerow(['UID', 'Record', '/', 'invalid'])
+        with mock.patch.object(KeeperPerms, 'get_teams', return_value=[{'team_name': 'Team1', 'team_uid': 'T1'}]):
+            self.assertFalse(keeper.validate_csv('bad.csv'))
+        os.unlink('bad.csv')
+
