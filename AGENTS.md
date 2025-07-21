@@ -27,11 +27,27 @@ This file provides guidance for AI agents contributing to this repository.
    ```
    Some tests require configuration files (for example `tests/config.json`) and may fail if those files or external services are unavailable.
 
+## Live Integration Tests
+
+Certain tests interact with a real Keeper Vault and are marked with the
+`integration` label. These require a `tests/vault.json` configuration file
+containing valid account credentials. After activating the environment and
+installing dependencies, run them with:
+
+```bash
+pytest -q -m integration
+```
+
+After the live tests complete, confirm that no unexpected data remains in the
+Vault. You can use standard `keeper` commands to inspect and clean up records.
+Document any vault changes or cleanup steps in the `codex` directory.
+
 ## Documentation Notes
 
 Repository documentation references the [official Keeper Commander documentation](https://docs.keeper.io/secrets-manager/commander-cli/overview). Review that site for detailed usage instructions.
 
 Additional documentation and notes are stored in the `codex` directory.
+
 
 ## Helper Function Guidelines
 
@@ -48,3 +64,7 @@ def example_helper(params, uid):  # type: (KeeperParams, str) -> None
 
 Place new helpers below existing ones with a blank line separation.
 No updates to `__init__.py` files are required when adding standalone helpers.
+
+Store any design notes, test logs, and experimental findings in this folder so
+future agents can reference them.
+

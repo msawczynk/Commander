@@ -13,3 +13,14 @@ Automated tests were added in `unit-tests/test_perms_command.py` to ensure the C
 
 All tests run with `pytest unit-tests/test_perms_command.py` and pass after patching network calls.
 
+## Recent test run
+
+The repository does not contain live tests for the `perms` command. Running the
+available unit test file with Python 3.12 produced the following output:
+
+```
+......                                                                   [100%]
+6 passed in 3.37s
+```
+
+
