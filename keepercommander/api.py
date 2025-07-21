@@ -1538,6 +1538,7 @@ def load_records_in_shared_folder(params, shared_folder_uid, record_uids=None):
         record_set.difference_update(params.record_cache.keys())
 
 
+
 def get_pb2_records_request(params, request_type='add'):
     # type: (KeeperParams, str) -> Union[record_pb2.RecordsUpdateRequest, record_pb2.RecordsAddRequest]
     rq_by_type = dict(add=record_pb2.RecordsAddRequest, update=record_pb2.RecordsUpdateRequest)
