@@ -6,7 +6,7 @@ import pytest
 
 from data_config import read_config_file
 from keepercommander.params import KeeperParams
-from keepercommander import api
+from keepercommander import api, cli
 from keepercommander.commands.perms_command import KeeperPerms
 
 
@@ -18,12 +18,13 @@ class TestPermsLive(TestCase):
     def setUpClass(cls):
         cls.params = KeeperParams()
         # use the sandbox's persistent config; no vault.json required
-        read_config_file(cls.params)
+        keeper_config = os.path.join(os.path.expanduser('~'), '.keeper', 'config.json')
+        read_config_file(cls.params, keeper_config)
         api.login(cls.params)
 
     @classmethod
     def tearDownClass(cls):
-        api.logout(cls.params)
+        cli.do_command(cls.params, 'logout')
 
     def test_generate_and_validate_template(self):
         params = TestPermsLive.params
