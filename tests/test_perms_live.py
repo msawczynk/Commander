@@ -40,5 +40,10 @@ class TestPermsLive(TestCase):
     def test_permission_flags(self):
         keeper = KeeperPerms(TestPermsLive.params)
         flags = keeper.permission_level_to_flags('rw')
-        expected = {'manage_records': False, 'manage_users': False, 'can_edit': True, 'can_share': False}
+        expected = {
+            'manage_records': False,
+            'manage_users': False,
+            'can_edit': True,
+            'can_share': False,
+        }
         self.assertEqual(flags, expected)

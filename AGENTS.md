@@ -38,9 +38,9 @@ installing dependencies, run them with:
 pytest -q -m integration
 ```
 
-Live tests for the `perms` command use the same `tests/vault.json` file. The
-sandbox environment keeps a persistent login so no additional configuration is
-needed.
+Live tests for the `perms` command rely on the existing `tests/vault.json`
+configuration. The sandbox already maintains a persistent login, so no new
+credentials or files are required. Do not modify the configuration file.
 
 After the live tests complete, confirm that no unexpected data remains in the
 Vault. You can use standard `keeper` commands to inspect and clean up records.
