@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
 
 from keepercommander import api
+from .helpers.shared_folder import add_team_to_shared_folder
 from keepercommander.commands.base import GroupCommand, Command
 from keepercommander.params import KeeperParams
 from keepercommander.commands.folder import FolderMakeCommand
@@ -286,7 +287,7 @@ class KeeperPerms:
         api.move_record(self.params, record_uid, folder_uid, shared=True)
 
     def add_team_to_shared_folder(self, team_uid: str, folder_uid: str, permissions: Dict[str, bool]):
-        api.add_team_to_shared_folder(self.params, folder_uid, team_uid, **permissions)
+        add_team_to_shared_folder(self.params, folder_uid, team_uid, **permissions)
 
     def permission_level_to_flags(self, level: str) -> Dict[str, bool]:
         levels = {
