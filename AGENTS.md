@@ -38,6 +38,10 @@ installing dependencies, run them with:
 pytest -q -m integration
 ```
 
+Live tests for the `perms` command use the same `tests/vault.json` file. The
+sandbox environment keeps a persistent login so no additional configuration is
+needed.
+
 After the live tests complete, confirm that no unexpected data remains in the
 Vault. You can use standard `keeper` commands to inspect and clean up records.
 Document any vault changes or cleanup steps in the `codex` directory.
