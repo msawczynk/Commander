@@ -522,3 +522,4 @@ class TestCronScheduleParsing(unittest.TestCase):
         params, _ = create_mock_params_and_record()
         with self.assertRaises(CommandError):
             self.command.execute(params, record_name='uid', schedule_cron_data=['0 12 * *'])
+

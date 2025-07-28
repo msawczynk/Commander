@@ -584,57 +584,6 @@ class PAMCreateRecordRotationCommand(Command):
                     rq.resourceUid = b''
                 r_requests.append(rq)
                 return
-            schedule_only = kwargs.get('schedule_only')
-            if schedule_only:
-                if kwargs.get('folder_name') and (not current_record_rotation or current_record_rotation.get('disabled')):
-                    skipped_records.append([target_record.record_uid, target_record.title,
-                                            'Rotation not enabled', 'Skipped'])
-                    return
-                if not current_record_rotation:
-                    skipped_records.append([target_record.record_uid, target_record.title,
-                                            'No rotation info', 'Skipped'])
-                    return
-
-                record_config_uid = current_record_rotation.get('configuration_uid')
-                record_resource_uid = current_record_rotation.get('resourceUid')
-                record_pam_config = pam_configurations.get(record_config_uid, pam_config)
-                record_schedule_data = schedule_data
-                if record_schedule_data is None:
-                    try:
-                        cs = current_record_rotation.get('schedule')
-                        record_schedule_data = json.loads(cs) if cs else []
-                    except:
-                        record_schedule_data = []
-                pwd_complexity_rule_list_encrypted = utils.base64_url_decode(current_record_rotation.get('pwd_complexity', ''))
-                disabled = current_record_rotation.get('disabled', False)
-
-                schedule = 'On-Demand'
-                if isinstance(record_schedule_data, list) and len(record_schedule_data) > 0:
-                    if isinstance(record_schedule_data[0], dict):
-                        schedule = record_schedule_data[0].get('type')
-                complexity = ''
-                if pwd_complexity_rule_list_encrypted:
-                    try:
-                        decrypted_complexity = crypto.decrypt_aes_v2(pwd_complexity_rule_list_encrypted, target_record.record_key)
-                        c = json.loads(decrypted_complexity.decode())
-                        complexity = f"{c.get('length', 0)},{c.get('caps', 0)},{c.get('lowercase', 0)},{c.get('digits', 0)},{c.get('special', 0)},{c.get('specialChars', PAM_DEFAULT_SPECIAL_CHAR)}"
-                    except Exception:
-                        pass
-
-                valid_records.append([
-                    target_record.record_uid, target_record.title, not disabled, record_config_uid,
-                    record_resource_uid, schedule, complexity])
-
-                rq = router_pb2.RouterRecordRotationRequest()
-                rq.revision = current_record_rotation.get('revision', 0)
-                rq.recordUid = utils.base64_url_decode(target_record.record_uid)
-                rq.configurationUid = utils.base64_url_decode(record_config_uid)
-                rq.resourceUid = utils.base64_url_decode(record_resource_uid) if record_resource_uid else b''
-                rq.schedule = json.dumps(record_schedule_data) if record_schedule_data else ''
-                rq.pwdComplexity = pwd_complexity_rule_list_encrypted
-                rq.disabled = disabled
-                r_requests.append(rq)
-                return
 
             # 1. PAM Configuration UID
             record_config_uid = _dag.record.record_uid
