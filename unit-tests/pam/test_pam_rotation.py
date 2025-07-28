@@ -82,6 +82,10 @@ if sys.version_info >= (3, 8):
             self.assertEqual(args.record_name, 'record_uid')
             self.assertTrue(args.force)
 
+        def test_parser_schedule_only(self):
+            args = self.parser.parse_args(['--record', 'record_uid', '--schedule-only'])
+            self.assertTrue(args.schedule_only)
+
         @patch('keepercommander.vault.KeeperRecord.load')
         @patch('keepercommander.commands.discoveryrotation.TunnelDAG')
         @patch('keepercommander.rest_api.SERVER_PUBLIC_KEYS', {8: ec.generate_private_key(ec.SECP256R1()).public_key()})
@@ -407,7 +411,7 @@ if sys.version_info >= (3, 8):
             self.assertTrue(mock_pam_configurations_get_all.called)
 
 
-    class TestPAMGatewayListCommand(unittest.TestCase):
+class TestPAMGatewayListCommand(unittest.TestCase):
 
         def setUp(self):
             self.command = PAMGatewayListCommand()
@@ -507,3 +511,14 @@ if sys.version_info >= (3, 8):
             self.assertTrue(mock_router_get_connected_gateways.called)
             self.assertTrue(mock_get_all_gateways.called)
             self.assertTrue(mock_get_router_url.called)
+
+
+class TestCronScheduleParsing(unittest.TestCase):
+
+    def setUp(self):
+        self.command = PAMCreateRecordRotationCommand()
+
+    def test_invalid_cron_components(self):
+        params, _ = create_mock_params_and_record()
+        with self.assertRaises(CommandError):
+            self.command.execute(params, record_name='uid', schedule_cron_data=['0 12 * *'])
