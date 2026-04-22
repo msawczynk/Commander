@@ -218,6 +218,51 @@ def _record_has_host_port(record: Any) -> bool:
     return bool(host) and port is not None
 
 
+def _get_jit_settings(record: Any) -> Optional[Dict[str, Any]]:
+    """
+    Extract the jit_settings block from pamSettings.options if present.
+
+    Returns the raw dict verbatim (declarative schema shape) or None when the record has no
+    JIT block. Callers combine this with _derive_jit_mode() to decide whether JIT is active
+    and whether the record wants ephemeral, elevation, or both.
+    """
+    if not record:
+        return None
+    pam_settings_field = getattr(record, 'get_typed_field', lambda _t: None)('pamSettings')
+    if not pam_settings_field:
+        return None
+    pam_settings_value = pam_settings_field.get_default_value(dict) if hasattr(pam_settings_field, 'get_default_value') else None
+    if not isinstance(pam_settings_value, dict):
+        return None
+    options = pam_settings_value.get('options')
+    if not isinstance(options, dict):
+        return None
+    jit_raw = options.get('jit_settings')
+    if not isinstance(jit_raw, dict):
+        return None
+    return jit_raw
+
+
+def _derive_jit_mode(jit_settings: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    Return 'ephemeral', 'elevation', 'both', or None from a jit_settings dict.
+
+    Mirrors the terminal_connection.extract_terminal_settings derivation so callers in
+    launch.py (validation / precedence) and the offer builder stay in sync.
+    """
+    if not isinstance(jit_settings, dict):
+        return None
+    create_ephemeral = bool(jit_settings.get('create_ephemeral'))
+    elevate = bool(jit_settings.get('elevate'))
+    if create_ephemeral and elevate:
+        return 'both'
+    if create_ephemeral:
+        return 'ephemeral'
+    if elevate:
+        return 'elevation'
+    return None
+
+
 class PAMLaunchCommand(Command):
     """PAM Launch command to launch a connection to a PAM resource"""
 
@@ -238,6 +283,12 @@ class PAMLaunchCommand(Command):
     parser.add_argument('--host-record', '-hr', required=False, dest='host_record', type=str,
                         help='Record (UID, path, or title) with a host or pamHostname field containing hostName and port. '
                              'Requires allowSupplyHost. Mutually exclusive with --host.')
+    parser.add_argument('--jit', '-j', required=False, dest='jit', action='store_true',
+                        help='Trigger just-in-time (JIT) access at connect time. The gateway creates an '
+                             'ephemeral account and/or elevates an existing account for the session and '
+                             'reverts on disconnect. Requires jit_settings on the record '
+                             '(pamSettings.options.jit_settings). Mutually exclusive with --credential, '
+                             '--host and --host-record.')
 
     def get_parser(self):
         return PAMLaunchCommand.parser
@@ -459,11 +510,12 @@ class PAMLaunchCommand(Command):
             root_logger.setLevel(logging.ERROR)
 
         try:
-            # TODO: Add JIT - note that allowSupplyHost overrides all other supply modes.
-            # When a PAM record has allowSupplyHost, allowSupplyUser, and JIT settings all enabled,
-            # the Web Vault (and this CLI) treat allowSupplyHost as the active mode and ignore the
-            # other two. Any validation logic below must reflect this precedence: if allowSupplyHost
-            # is True, treat the record as "host+credential supply" mode regardless of the other flags.
+            # Precedence note (matches Web Vault): allowSupplyHost > JIT > allowSupplyUser > linked.
+            # When a record has allowSupplyHost + jit_settings + allowSupplyUser all enabled,
+            # allowSupplyHost wins and the JIT block is ignored (the operator is supplying
+            # host+credential explicitly). launch.py enforces this below by rejecting --jit when
+            # the record already has allowSupplyHost, and by ignoring jit_settings downstream in
+            # terminal_connection.py when allowSupplyHost is on.
 
             record_token = kwargs.get('record')
 
@@ -525,6 +577,47 @@ class PAMLaunchCommand(Command):
 
             # Get record host/port for fallback validation
             hostname_on_record, port_on_record = _get_host_port_from_record(record)
+
+            # --- Resolve --jit option (JIT just-in-time access) ---
+            # Validation rules:
+            #   1. --jit requires the record to have a meaningful jit_settings block
+            #      (create_ephemeral and/or elevate set to true).
+            #   2. --jit is mutually exclusive with --credential / --host / --host-record
+            #      since JIT provisions the credential itself. If operators genuinely need to
+            #      override either of those, they should not use JIT for that session.
+            #   3. allowSupplyHost wins over JIT per Web Vault precedence; --jit on a record
+            #      with allowSupplyHost is rejected with a clear error.
+            #   4. ephemeral_account_type == 'domain' requires pam_directory_uid_ref, matching
+            #      the declarative schema's validate-time rule.
+            jit_flag = bool(kwargs.get('jit'))
+            jit_settings = _get_jit_settings(record)
+            jit_mode = _derive_jit_mode(jit_settings) if jit_settings else None
+
+            if jit_flag:
+                if not jit_settings or not jit_mode:
+                    raise CommandError('pam launch',
+                        '--jit requires the PAM record to define pamSettings.options.jit_settings '
+                        'with create_ephemeral and/or elevate set to true.')
+                if allow_supply_host:
+                    raise CommandError('pam launch',
+                        '--jit cannot be combined with allowSupplyHost on the record. '
+                        'Either disable allowSupplyHost or launch without --jit to supply '
+                        'host+credential manually.')
+                if kwargs.get('launch_credential') or kwargs.get('custom_host') or kwargs.get('host_record'):
+                    raise CommandError('pam launch',
+                        '--jit is mutually exclusive with --credential/--host/--host-record. '
+                        'JIT provisions the credential itself; remove those flags to use --jit.')
+                # Domain ephemeral accounts need a pam_directory_uid_ref to bind against.
+                if jit_mode in ('ephemeral', 'both'):
+                    if (jit_settings.get('ephemeral_account_type') == 'domain'
+                            and not jit_settings.get('pam_directory_uid_ref')):
+                        raise CommandError('pam launch',
+                            'jit_settings.ephemeral_account_type=domain requires '
+                            'pam_directory_uid_ref on the record.')
+                # Propagate to downstream so the offer builder emits the right inputs.
+                kwargs['jit_mode'] = jit_mode
+                kwargs['jit_settings'] = jit_settings
+                logging.debug(f"JIT mode enabled: {jit_mode} (settings={jit_settings})")
 
             # --- Resolve --credential option ---
             launch_credential = kwargs.get('launch_credential')
