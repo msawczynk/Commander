@@ -17,7 +17,9 @@ from keepercommander.error import CommandError
 # launch.py / terminal_connection.py both pull in large transitive dep trees
 # (WebRTC / router / Guacamole). The import guard matches the pattern in
 # test_pam_tunnel.py: only run when the optional deps are available.
-if sys.version_info >= (3, 8):
+JIT_TESTS_ENABLED = sys.version_info >= (3, 8)
+
+if JIT_TESTS_ENABLED:
     from keepercommander.commands.pam_launch.terminal_connection import (
         _build_jit_ephemeral_payload,
         _build_jit_elevation_payload,
@@ -28,6 +30,14 @@ if sys.version_info >= (3, 8):
         _derive_jit_mode,
         _get_jit_settings,
     )
+else:
+    # Keep module importable on 3.7 and skip test classes explicitly.
+    _build_jit_ephemeral_payload = None
+    _build_jit_elevation_payload = None
+    _JIT_EPHEMERAL_KEYS = ()
+    _JIT_ELEVATION_KEYS = ()
+    _derive_jit_mode = None
+    _get_jit_settings = None
 
 
 def _typed_field_stub(value):
@@ -45,6 +55,7 @@ def _record_with_pam_settings(pam_settings_value):
     return SimpleNamespace(get_typed_field=_get)
 
 
+@unittest.skipUnless(JIT_TESTS_ENABLED, "Requires Python >= 3.8")
 class TestBuildJitEphemeralPayload(unittest.TestCase):
     def test_returns_empty_for_none(self):
         self.assertEqual(_build_jit_ephemeral_payload(None), {})
@@ -79,6 +90,7 @@ class TestBuildJitEphemeralPayload(unittest.TestCase):
         self.assertNotIn('pam_directory_uid_ref', payload)
 
 
+@unittest.skipUnless(JIT_TESTS_ENABLED, "Requires Python >= 3.8")
 class TestBuildJitElevationPayload(unittest.TestCase):
     def test_returns_empty_for_none(self):
         self.assertEqual(_build_jit_elevation_payload(None), {})
@@ -110,6 +122,7 @@ class TestBuildJitElevationPayload(unittest.TestCase):
         self.assertNotIn('elevation_string', payload)
 
 
+@unittest.skipUnless(JIT_TESTS_ENABLED, "Requires Python >= 3.8")
 class TestDeriveJitMode(unittest.TestCase):
     def test_none_for_non_dict(self):
         self.assertIsNone(_derive_jit_mode(None))
@@ -135,6 +148,7 @@ class TestDeriveJitMode(unittest.TestCase):
         }), 'both')
 
 
+@unittest.skipUnless(JIT_TESTS_ENABLED, "Requires Python >= 3.8")
 class TestGetJitSettings(unittest.TestCase):
     def test_none_record(self):
         self.assertIsNone(_get_jit_settings(None))
@@ -161,6 +175,7 @@ class TestGetJitSettings(unittest.TestCase):
         self.assertIsNone(_get_jit_settings(record))
 
 
+@unittest.skipUnless(JIT_TESTS_ENABLED, "Requires Python >= 3.8")
 class TestDispatchIntegration(unittest.TestCase):
     """
     The dispatch (credential_type_for_gateway selection) is inlined in
