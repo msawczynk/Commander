@@ -36,6 +36,7 @@ try:
 except ImportError:
     ZoneInfo = None
 
+
 _TRANSPORT_ERROR = object()
 
 
