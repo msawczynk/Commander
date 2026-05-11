@@ -16,7 +16,7 @@ import json
 import logging
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -51,6 +51,15 @@ _COMMANDER_SENSITIVE_ARG_SUFFIXES = (
     "-password",
 )
 _COMMANDER_REDACTION = "***REDACTED***"
+_SAFE_JSON_FIELDS = {
+    "ImportResult": frozenset(("exit_code", "verb", "summary", "changes_count")),
+    "ShimCommandResult": frozenset(("exit_code", "verb", "summary", "changes_count")),
+    "Plan": frozenset(("change_count", "families", "verb", "dry_run")),
+    "MigratePlanResult": frozenset(("change_count", "families", "verb", "dry_run")),
+}
+_UNSAFE_JSON_FIELDS = frozenset(
+    ("args", "stdout", "stderr", "manifest_yaml", "changes", "before", "after")
+)
 
 
 def _is_sensitive_arg_name(arg: str) -> bool:
@@ -117,9 +126,42 @@ def _json_output(kwargs: Mapping[str, Any]) -> bool:
     return not sys.stdout.isatty()
 
 
-def _to_jsonable(value: Any) -> Any:
+def _safe_json_fields_for(value: Any) -> frozenset[str] | None:
+    for cls in type(value).__mro__:
+        safe_fields = _SAFE_JSON_FIELDS.get(cls.__name__)
+        if safe_fields is not None:
+            return safe_fields
+    return None
+
+
+def _field_map(value: Any) -> dict[str, Any]:
     if is_dataclass(value):
-        return _to_jsonable(asdict(value))
+        return {field.name: getattr(value, field.name) for field in fields(value)}
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items()}
+    return {}
+
+
+def _safe_result_to_jsonable(value: Any, safe_fields: frozenset[str]) -> dict[str, Any]:
+    raw = _field_map(value)
+    jsonable = {
+        key: _to_jsonable(raw[key])
+        for key in safe_fields
+        if key in raw and key not in _UNSAFE_JSON_FIELDS
+    }
+    if "change_count" in safe_fields and "change_count" not in jsonable and "changes" in raw:
+        jsonable["change_count"] = len(raw.get("changes") or [])
+    if "changes_count" in safe_fields and "changes_count" not in jsonable and "changes" in raw:
+        jsonable["changes_count"] = len(raw.get("changes") or [])
+    return jsonable
+
+
+def _to_jsonable(value: Any) -> Any:
+    safe_fields = _safe_json_fields_for(value)
+    if safe_fields is not None:
+        return _safe_result_to_jsonable(value, safe_fields)
+    if is_dataclass(value):
+        return _to_jsonable(_field_map(value))
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, Enum):
@@ -128,12 +170,9 @@ def _to_jsonable(value: Any) -> Any:
         jsonable = {}
         for k, v in value.items():
             key = str(k)
-            if key == "args" and isinstance(v, Sequence) and not isinstance(
-                v, (str, bytes, bytearray)
-            ):
-                jsonable[key] = _redact_args_for_safety([str(arg) for arg in v])
-            else:
-                jsonable[key] = _to_jsonable(v)
+            if key in _UNSAFE_JSON_FIELDS:
+                continue
+            jsonable[key] = _to_jsonable(v)
         return jsonable
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return [_to_jsonable(v) for v in value]
@@ -164,6 +203,23 @@ def _shim_or_command_error(command: str):
         raise CommandError(command, str(exc)) from exc
 
 
+def _warn_if_active_session_ignored(
+    command: Command, params: KeeperParams, kwargs: Mapping[str, Any]
+) -> None:
+    session_token = getattr(params, "session_token", None)
+    if not (isinstance(session_token, str) and session_token) or kwargs.get("commander_config"):
+        return
+    parser = command.get_parser()
+    prog = parser.prog if parser else command.__class__.__name__
+    if prog.startswith("migrate "):
+        prog = prog.removeprefix("migrate ")
+    logging.warning(
+        "migrate %s: active Commander session will not be used; "
+        "DSK reads its own config (set --commander-config to be explicit)",
+        prog,
+    )
+
+
 # 8 verbs intentionally implemented as parallel Command subclasses for review
 # readability. DO NOT collapse via metaclass / class factory. Keeper-engineering
 # review benefits from reading 8 obvious classes. Lurey style: explicit > clever.
@@ -192,6 +248,8 @@ class MigrateAdoptCommand(Command):
         return self.parser
 
     def execute(self, params: KeeperParams, **kwargs: Any) -> str:
+        """Uses DSK environment (KEEPER_CONFIG / --commander-config), not the active Commander session."""
+        _warn_if_active_session_ignored(self, params, kwargs)
         dsk_shim = _shim_or_command_error("migrate adopt")
         result = dsk_shim.adopt(
             run_dir=kwargs["run_dir"],
@@ -227,6 +285,8 @@ class MigratePlanCommand(Command):
         return self.parser
 
     def execute(self, params: KeeperParams, **kwargs: Any) -> str:
+        """Uses DSK environment (KEEPER_CONFIG / --commander-config), not the active Commander session."""
+        _warn_if_active_session_ignored(self, params, kwargs)
         dsk_shim = _shim_or_command_error("migrate plan")
         result = dsk_shim.plan(
             target_state=kwargs["target_state"],
@@ -257,6 +317,8 @@ class MigrateApplyCommand(Command):
         return self.parser
 
     def execute(self, params: KeeperParams, **kwargs: Any) -> str:
+        """Uses DSK environment (KEEPER_CONFIG / --commander-config), not the active Commander session."""
+        _warn_if_active_session_ignored(self, params, kwargs)
         dsk_shim = _shim_or_command_error("migrate apply")
         result = dsk_shim.apply(
             plan=kwargs["plan"],
@@ -287,6 +349,8 @@ class MigrateDiffCommand(Command):
         return self.parser
 
     def execute(self, params: KeeperParams, **kwargs: Any) -> str:
+        """Uses DSK environment (KEEPER_CONFIG / --commander-config), not the active Commander session."""
+        _warn_if_active_session_ignored(self, params, kwargs)
         dsk_shim = _shim_or_command_error("migrate diff")
         result = dsk_shim.diff(
             manifest_path=kwargs["manifest_path"],
@@ -315,6 +379,8 @@ class MigrateAuditExplainCommand(Command):
         return self.parser
 
     def execute(self, params: KeeperParams, **kwargs: Any) -> str:
+        """Uses DSK environment (KEEPER_CONFIG / --commander-config), not the active Commander session."""
+        _warn_if_active_session_ignored(self, params, kwargs)
         dsk_shim = _shim_or_command_error("migrate audit-explain")
         result = dsk_shim.audit_explain(
             audit_log=kwargs["audit_log"],
@@ -347,6 +413,8 @@ class MigrateDriftWatchCommand(Command):
         return self.parser
 
     def execute(self, params: KeeperParams, **kwargs: Any) -> str:
+        """Uses DSK environment (KEEPER_CONFIG / --commander-config), not the active Commander session."""
+        _warn_if_active_session_ignored(self, params, kwargs)
         dsk_shim = _shim_or_command_error("migrate drift-watch")
         result = dsk_shim.drift_watch(
             manifest_paths=kwargs["manifest_paths"],
@@ -387,6 +455,8 @@ class MigrateRehearseReportCommand(Command):
         return self.parser
 
     def execute(self, params: KeeperParams, **kwargs: Any) -> str:
+        """Uses DSK environment (KEEPER_CONFIG / --commander-config), not the active Commander session."""
+        _warn_if_active_session_ignored(self, params, kwargs)
         dsk_shim = _shim_or_command_error("migrate rehearse-report")
         result = dsk_shim.rehearse_report(
             run_dir=kwargs["run_dir"],
@@ -414,6 +484,8 @@ class MigrateBundleCommand(Command):
         return self.parser
 
     def execute(self, params: KeeperParams, **kwargs: Any) -> str:
+        """Uses DSK environment (KEEPER_CONFIG / --commander-config), not the active Commander session."""
+        _warn_if_active_session_ignored(self, params, kwargs)
         dsk_shim = _shim_or_command_error("migrate bundle")
         result = dsk_shim.bundle(
             manifest_path=kwargs["manifest_path"],

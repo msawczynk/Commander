@@ -3,6 +3,7 @@ import sys
 import types
 import unittest
 from contextlib import contextmanager
+from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 
@@ -226,6 +227,48 @@ class TestMigrateVerbCommands(unittest.TestCase):
         )
 
 
+class TestMigrateSessionConfusionGuard(unittest.TestCase):
+    def test_execute_docstrings_disclose_dsk_environment(self):
+        from keepercommander.commands import migrate
+
+        expected = (
+            "Uses DSK environment (KEEPER_CONFIG / --commander-config), "
+            "not the active Commander session."
+        )
+        command_types = (
+            migrate.MigrateAdoptCommand,
+            migrate.MigratePlanCommand,
+            migrate.MigrateApplyCommand,
+            migrate.MigrateDiffCommand,
+            migrate.MigrateAuditExplainCommand,
+            migrate.MigrateDriftWatchCommand,
+            migrate.MigrateRehearseReportCommand,
+            migrate.MigrateBundleCommand,
+        )
+
+        for command_type in command_types:
+            self.assertEqual(expected, command_type.execute.__doc__)
+
+    def test_active_session_without_commander_config_warns(self):
+        from keepercommander.commands.migrate import MigrateAdoptCommand
+
+        adopt = MagicMock(return_value=shim_result())
+        params = types.SimpleNamespace(session_token="active-session")
+        with fake_dsk_shim(adopt=adopt):
+            with self.assertLogs(level="WARNING") as logs:
+                MigrateAdoptCommand().execute(
+                    params,
+                    run_dir="/tmp/run",
+                    output=None,
+                    dry_run=True,
+                )
+
+        self.assertIn(
+            "migrate adopt: active Commander session will not be used",
+            "\n".join(logs.output),
+        )
+
+
 class TestMigrateJsonRedaction(unittest.TestCase):
     def test_json_serialization_redacts_sensitive_args(self):
         from keepercommander.commands.migrate import _redact_args_for_safety
@@ -238,31 +281,111 @@ class TestMigrateJsonRedaction(unittest.TestCase):
         self.assertIn("--manifest", redacted)
         self.assertIn("/tmp/m.yml", redacted)
 
-    def test_json_output_path_redacts_sensitive_args(self):
+
+class TestSafeJsonOutput(unittest.TestCase):
+    def assert_no_sensitive_json_fields(self, output):
+        for field in ("manifest_yaml", "stdout", "stderr", "before", "after"):
+            self.assertNotIn(f'"{field}"', output)
+
+    def test_emit_result_uses_result_allowlist(self):
+        from keepercommander.commands.migrate import _emit_result
+
+        @dataclass
+        class ImportResult:
+            exit_code: int
+            stdout: str
+            stderr: str
+            args: tuple[str, ...]
+            manifest_yaml: str
+            before: dict
+            after: dict
+            verb: str
+            summary: dict
+            changes_count: int
+
+        result = ImportResult(
+            exit_code=0,
+            stdout="stdout secret",
+            stderr="stderr secret",
+            args=("--github-token", "ghp_secret"),
+            manifest_yaml="manifest secret",
+            before={"password": "old"},
+            after={"password": "new"},
+            verb="adopt",
+            summary={"ok": True, "before": {"password": "old"}},
+            changes_count=1,
+        )
+        output = _emit_result(
+            result,
+            {"format": "json"},
+        )
+        payload = json.loads(output)
+
+        self.assertEqual(
+            {"changes_count": 1, "exit_code": 0, "summary": {"ok": True}, "verb": "adopt"},
+            payload,
+        )
+        self.assert_no_sensitive_json_fields(output)
+        self.assertNotIn("ghp_secret", output)
+
+    def test_emit_result_uses_plan_allowlist(self):
+        from keepercommander.commands.migrate import _emit_result
+
+        @dataclass
+        class Change:
+            title: str
+            before: dict
+            after: dict
+
+        @dataclass
+        class Plan:
+            changes: list[Change]
+            families: tuple[str, ...]
+            verb: str
+            dry_run: bool
+
+        result = Plan(
+            changes=[
+                Change(
+                    title="record",
+                    before={"password": "old"},
+                    after={"password": "new"},
+                )
+            ],
+            families=("pam",),
+            verb="plan",
+            dry_run=True,
+        )
+        output = _emit_result(result, {"format": "json"})
+        payload = json.loads(output)
+
+        self.assertEqual(
+            {"change_count": 1, "dry_run": True, "families": ["pam"], "verb": "plan"},
+            payload,
+        )
+        self.assert_no_sensitive_json_fields(output)
+        self.assertNotIn("password", output)
+
+    def test_emit_result_strips_unsafe_mapping_fields(self):
         from keepercommander.commands.migrate import _emit_result
 
         output = _emit_result(
             {
                 "exit_code": 0,
-                "stdout": "",
-                "stderr": "",
-                "args": [
-                    "drift-watch",
-                    "--github-token",
-                    "ghp_secret",
-                    "--manifest",
-                    "/tmp/m.yml",
-                ],
+                "stdout": "stdout secret",
+                "stderr": "stderr secret",
+                "manifest_yaml": "manifest secret",
+                "before": {"password": "old"},
+                "after": {"password": "new"},
+                "args": ["--github-token", "ghp_secret"],
             },
             {"format": "json"},
         )
         payload = json.loads(output)
 
+        self.assertEqual({"exit_code": 0}, payload)
+        self.assert_no_sensitive_json_fields(output)
         self.assertNotIn("ghp_secret", output)
-        self.assertEqual(
-            ["drift-watch", "--github-token", "***REDACTED***", "--manifest", "/tmp/m.yml"],
-            payload["args"],
-        )
 
 
 class TestRedactionListsInSync(unittest.TestCase):
